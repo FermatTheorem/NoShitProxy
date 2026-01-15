@@ -1,0 +1,53 @@
+[project]
+name = "noshitproxy"
+version = "0.1.0"
+description = "Lightweight MITM proxy and request sender"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.128.0",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "mitmproxy>=12.2.1",
+    "pydantic>=2.12.5",
+    "typer>=0.21.1",
+    "uvicorn[standard]>=0.40.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.11",
+]
+
+[tool.ruff]
+target-version = "py313"
+output-format = "concise"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["D203", "D212", "COM812", "D10", "TC003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+strict_equality_for_none = true
+
+[[tool.mypy.overrides]]
+module = ["aiosqlite.*", "mitmproxy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]

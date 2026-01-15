@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoShitProxy</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">◈</div>
+      <span class="logo-text">NoShitProxy</span>
+    </div>
+    <div class="status-bar">
+      <div class="status-item">
+        <span>Proxy</span>
+        <span class="status-value">127.0.0.1:8080</span>
+      </div>
+      <div class="status-item">
+        <span>UI</span>
+        <span class="status-value">127.0.0.1:8000</span>
+      </div>
+      <div class="status-item">
+        <span>CA</span>
+        <a href="http://mitm.it" class="status-value">mitm.it</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main App -->
+  <main class="app-container">
+    <!-- Tab radios -->
+    <input type="radio" name="tabs" id="tab-history" class="tab-radio" checked>
+    <input type="radio" name="tabs" id="tab-repeater" class="tab-radio">
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+      <label class="tab-label" for="tab-history">
+        <span class="icon">📡</span> HTTP History
+      </label>
+      <label class="tab-label" for="tab-repeater">
+        <span class="icon">🔄</span> Repeater
+      </label>
+    </nav>
+
+    <!-- Tab Panels -->
+    <div class="tab-panels">
+      
+      <!-- History Panel - Burp Suite Style -->
+      <section class="tab-panel panel-history">
+        <!-- Top: History Table -->
+          <div class="history-section">
+          <div class="history-toolbar">
+            <div class="search-container">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="q" class="search-input" placeholder="Search...">
+            </div>
+            <div class="history-controls">
+              <label class="ctrl">
+                <span class="ctrl-label">Show</span>
+                <input type="number" id="page_size" class="ctrl-input" min="50" max="2000" step="50" value="500">
+              </label>
+              <div class="ctrl-buttons">
+                <button type="button" id="page_newer" class="btn btn-ghost btn-sm">Newer</button>
+                <button type="button" id="page_older" class="btn btn-ghost btn-sm">Older</button>
+              </div>
+              <div class="ctrl-meta" id="page_meta">Page 1</div>
+            </div>
+          </div>
+
+          <div class="history-filters">
+            <select id="f_method" class="ctrl-input">
+              <option value="">Method ▾</option>
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+              <option>DELETE</option>
+              <option>HEAD</option>
+              <option>OPTIONS</option>
+            </select>
+            <input type="number" id="f_status" class="ctrl-input" placeholder="Status =">
+            <input type="text" id="f_url" class="ctrl-input" placeholder="URL contains">
+            <input type="text" id="f_body" class="ctrl-input" placeholder="Body contains">
+            <input type="number" id="f_time_min" class="ctrl-input" placeholder="Time ≥">
+            <input type="number" id="f_time_max" class="ctrl-input" placeholder="Time ≤">
+            <input type="number" id="f_size_min" class="ctrl-input" placeholder="Size ≥">
+            <input type="number" id="f_size_max" class="ctrl-input" placeholder="Size ≤">
+            <button type="button" id="f_clear" class="btn btn-ghost btn-sm">Clear</button>
+          </div>
+
+          <div class="history-table-wrapper">
+            <table class="history-table" id="history-table">
+              <thead>
+                <tr>
+                  <th data-col="num" style="width:48px"><span>#</span><div class="resize-handle"></div></th>
+                  <th data-col="method" style="width:70px"><span>Method</span><div class="resize-handle"></div></th>
+                  <th data-col="url"><span>URL</span><div class="resize-handle"></div></th>
+                  <th data-col="status" style="width:60px"><span>Status</span><div class="resize-handle"></div></th>
+                  <th data-col="size" style="width:80px"><span>Size</span><div class="resize-handle"></div></th>
+                  <th data-col="time" style="width:70px"><span>Time</span></th>
+                </tr>
+              </thead>
+              <tbody id="flows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Bottom: Request/Response Split -->
+        <div class="detail-section">
+          <div class="detail-pane">
+            <div class="pane-header">
+              <span>Request</span>
+              <div class="pane-actions">
+                <button type="button" id="pretty-request" class="btn btn-ghost btn-sm">Pretty</button>
+                <button type="button" id="raw-request-btn" class="btn btn-ghost btn-sm is-active">Raw</button>
+              </div>
+            </div>
+            <div class="pane-content">
+              <pre id="raw-request" class="raw-http">Select a request from the history above</pre>
+            </div>
+          </div>
+          <div class="detail-pane">
+            <div class="pane-header">
+              <span>Response</span>
+              <div class="pane-actions">
+                <button type="button" id="pretty-response" class="btn btn-ghost btn-sm">Pretty</button>
+                <button type="button" id="raw-response-btn" class="btn btn-ghost btn-sm is-active">Raw</button>
+                <button type="button" id="load-full-response" class="btn btn-ghost btn-sm">Full</button>
+              </div>
+            </div>
+            <div class="pane-content">
+              <pre id="raw-response" class="raw-http">Response will appear here</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Repeater Panel -->
+      <section class="tab-panel panel-repeater">
+          <div class="repeater-pane">
+            <div class="pane-header">
+              <span>Request</span>
+              <div class="pane-actions">
+                <button type="button" id="rep-mode-structured" class="btn btn-ghost btn-sm is-active">Structured</button>
+                <button type="button" id="rep-mode-raw" class="btn btn-ghost btn-sm">Raw</button>
+              </div>
+            </div>
+            <div class="rep-tabs-bar">
+              <div id="rep-tabs" class="rep-tabs"></div>
+              <button type="button" id="rep-new" class="btn btn-ghost btn-sm">＋</button>
+            </div>
+
+            <div class="repeater-form">
+
+            <div id="rep-structured-wrap" style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;">
+              <div class="form-row">
+                <div class="form-group method-group">
+                  <label class="form-label" for="rep_method">Method</label>
+                  <input type="text" id="rep_method" class="form-input" value="GET">
+                </div>
+                <div class="form-group flex-1">
+                  <label class="form-label" for="rep_url">URL</label>
+                  <input type="text" id="rep_url" class="form-input" placeholder="https://example.com/api">
+                </div>
+              </div>
+              <div class="form-group flex-grow">
+                <label class="form-label" for="rep_headers">Headers</label>
+                <textarea id="rep_headers" class="form-textarea" placeholder="Content-Type: application/json"></textarea>
+              </div>
+              <div class="form-group flex-grow">
+                <label class="form-label" for="rep_body">Body</label>
+                <textarea id="rep_body" class="form-textarea" placeholder='{"key": "value"}'></textarea>
+              </div>
+            </div>
+
+            <div class="form-group flex-grow" id="rep-raw-wrap" style="display:none;">
+              <label class="form-label" for="rep_raw">Raw request</label>
+              <textarea id="rep_raw" class="form-textarea" placeholder="GET https://example.com/ HTTP/1.1&#10;Header: value&#10;&#10;body"></textarea>
+            </div>
+
+            <div class="form-row">
+              <button type="button" id="send" class="btn btn-primary" style="flex: 1;">⚡ Send</button>
+              <button type="button" id="open" class="btn btn-ghost" style="flex: 1;">Open</button>
+            </div>
+          </div>
+        </div>
+        <div class="repeater-pane">
+          <div class="pane-header">
+            <span>Response</span>
+            <div class="pane-actions">
+              <button type="button" id="rep-pretty" class="btn btn-ghost btn-sm">Pretty</button>
+              <button type="button" id="rep-raw" class="btn btn-ghost btn-sm is-active">Raw</button>
+            </div>
+          </div>
+          <div class="pane-content">
+            <pre id="rep_out" class="raw-http">Response will appear here...</pre>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <div id="ctx-menu" class="ctx-menu" style="display:none;"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
