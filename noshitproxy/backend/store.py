@@ -18,6 +18,10 @@ class StoreNotOpenError(RuntimeError):
     pass
 
 
+class InvalidWhereError(ValueError):
+    pass
+
+
 class Store:
     def __init__(self, cfg: StoreConfig) -> None:
         self._cfg = cfg
@@ -70,11 +74,21 @@ class Store:
             CREATE INDEX IF NOT EXISTS idx_flows_host ON flows(host);
             CREATE INDEX IF NOT EXISTS idx_flows_status ON flows(status);
             CREATE INDEX IF NOT EXISTS idx_flows_method ON flows(method);
+
+            CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
             """
         )
         await db.commit()
         await _ensure_column(db, table="flows", column="resp_body_b64", ddl="TEXT")
         await _ensure_column(db, table="flows", column="resp_body_text", ddl="TEXT")
+        await _ensure_setting(
+            db,
+            key="scope",
+            value=json.dumps({"include": ["*"], "exclude": [], "drop": False}),
+        )
 
     async def upsert_flow(
         self,
@@ -166,10 +180,29 @@ class Store:
         )
         await db.commit()
 
+    async def count_flows(self, *, where: str | None) -> int:
+        db = self._conn()
+        if where:
+            await _validate_where(db, where)
+
+        sql = "SELECT COUNT(*) FROM flows"
+        if where:
+            sql += f" WHERE ({where})"
+
+        cur = await db.execute(sql)
+        row = await cur.fetchone()
+        await cur.close()
+        return int(row[0]) if row is not None else 0
+
     async def list_flows(self, query: FlowQuery) -> list[FlowSummary]:
         db = self._conn()
 
-        where, params = _build_flow_filters(query)
+        where: list[str] = []
+        params: list[object] = []
+
+        if query.where:
+            where.append(f"({query.where})")
+            await _validate_where(db, query.where)
 
         sql_parts = [
             "SELECT rowid, id, ts, method, url, host, path, status, duration,",
@@ -205,6 +238,78 @@ class Store:
             )
             for row in rows
         ]
+
+    async def get_scope(self) -> tuple[list[str], list[str], bool]:
+        db = self._conn()
+        cur = await db.execute("SELECT value FROM settings WHERE key = ?", ("scope",))
+        row = await cur.fetchone()
+        await cur.close()
+
+        if row is None or not isinstance(row[0], str) or row[0] == "":
+            return ["*"], [], False
+
+        loaded: object = json.loads(row[0])
+        if not isinstance(loaded, dict):
+            return ["*"], [], False
+
+        # Backward compat: {"patterns": [...], "drop": bool}
+        include_obj = loaded.get("include")
+        exclude_obj = loaded.get("exclude")
+        if include_obj is None and "patterns" in loaded:
+            include_obj = loaded.get("patterns")
+
+        drop_obj = loaded.get("drop")
+
+        include: list[str] = []
+        if isinstance(include_obj, list):
+            include.extend(
+                p.strip() for p in include_obj if isinstance(p, str) and p.strip()
+            )
+
+        exclude: list[str] = []
+        if isinstance(exclude_obj, list):
+            exclude.extend(
+                p.strip() for p in exclude_obj if isinstance(p, str) and p.strip()
+            )
+
+        drop = bool(drop_obj) if isinstance(drop_obj, bool) else False
+        return (include or ["*"]), exclude, drop
+
+    async def set_scope(
+        self, *, include: list[str], exclude: list[str], drop: bool
+    ) -> None:
+        db = self._conn()
+        payload = json.dumps(
+            {"include": include, "exclude": exclude, "drop": drop},
+            ensure_ascii=False,
+        )
+        await db.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("scope", payload),
+        )
+        await db.commit()
+
+    async def clear_flows(self) -> None:
+        db = self._conn()
+        await db.execute("DELETE FROM flows")
+        await db.commit()
+
+    async def match_flow_ids(self, *, where: str, ids: list[str]) -> list[str]:
+        if not ids:
+            return []
+
+        db = self._conn()
+        await _validate_where(db, where)
+
+        placeholders = ",".join("?" for _ in ids)
+        sql = f"SELECT id FROM flows WHERE id IN ({placeholders}) AND ({where})"  # noqa: S608
+
+        cur = await db.execute(sql, ids)
+        rows = await cur.fetchall()
+        await cur.close()
+
+        return [str(row[0]) for row in rows]
 
     async def get_resp_body(self, flow_id: str) -> tuple[str, str | None, int] | None:
         db = self._conn()
@@ -268,82 +373,6 @@ class Store:
         )
 
 
-def _add_like(where: list[str], params: list[object], clause: str, needle: str) -> None:
-    where.append(clause)
-    like = f"%{needle}%"
-    params.append(like)
-
-
-def _add_nullable_range(
-    where: list[str],
-    params: list[object],
-    col: str,
-    min_value: float | None,
-    max_value: float | None,
-) -> None:
-    if min_value is not None:
-        where.append(f"{col} IS NOT NULL AND {col} >= ?")
-        params.append(min_value)
-
-    if max_value is not None:
-        where.append(f"{col} IS NOT NULL AND {col} <= ?")
-        params.append(max_value)
-
-
-def _add_range(
-    where: list[str],
-    params: list[object],
-    col: str,
-    min_value: int | None,
-    max_value: int | None,
-) -> None:
-    if min_value is not None:
-        where.append(f"{col} >= ?")
-        params.append(min_value)
-
-    if max_value is not None:
-        where.append(f"{col} <= ?")
-        params.append(max_value)
-
-
-def _build_flow_filters(query: FlowQuery) -> tuple[list[str], list[object]]:
-    where: list[str] = []
-    params: list[object] = []
-
-    if query.q:
-        like = f"%{query.q}%"
-        where.append("(url LIKE ? OR req_preview LIKE ? OR resp_preview LIKE ?)")
-        params.extend([like, like, like])
-
-    if query.host:
-        where.append("host = ?")
-        params.append(query.host)
-
-    if query.method:
-        where.append("method = ?")
-        params.append(query.method.upper())
-
-    if query.status is not None:
-        where.append("status = ?")
-        params.append(int(query.status))
-
-    if query.url_contains:
-        _add_like(where, params, "url LIKE ?", query.url_contains)
-
-        if query.body_contains:
-            where.append("(req_preview LIKE ? OR resp_body_text LIKE ?)")
-            like = f"%{query.body_contains}%"
-            params.extend([like, like])
-
-    _add_nullable_range(
-        where, params, "duration", query.duration_min, query.duration_max
-    )
-
-    _add_range(where, params, "resp_size", query.resp_size_min, query.resp_size_max)
-
-    return where, params
-
-
 def _order_by_sql(sort_key: str | None, order: str | None) -> str:
     direction = "ASC" if order == "asc" else "DESC"
 
@@ -370,6 +399,34 @@ def _order_by_sql(sort_key: str | None, order: str | None) -> str:
         return f"ORDER BY duration IS NULL ASC, duration {direction}, ts DESC"
 
     return "ORDER BY ts DESC"
+
+
+WHERE_SEMICOLON_ERROR = "Semicolons are not allowed in WHERE"
+
+
+async def _validate_where(db: aiosqlite.Connection, where: str) -> None:
+    # Prevent multi-statements and ensure expression compiles.
+    if ";" in where:
+        raise InvalidWhereError(WHERE_SEMICOLON_ERROR)
+
+    try:
+        cur = await db.execute(
+            f"SELECT 1 FROM flows WHERE ({where}) LIMIT 1"  # noqa: S608
+        )
+        await cur.close()
+    except Exception as e:
+        raise InvalidWhereError(str(e)) from e
+
+
+async def _ensure_setting(db: aiosqlite.Connection, *, key: str, value: str) -> None:
+    cur = await db.execute("SELECT 1 FROM settings WHERE key = ?", (key,))
+    row = await cur.fetchone()
+    await cur.close()
+    if row is not None:
+        return
+
+    await db.execute("INSERT INTO settings(key, value) VALUES (?, ?)", (key, value))
+    await db.commit()
 
 
 async def _ensure_column(

@@ -5,14 +5,16 @@ import base64
 import binascii
 import dataclasses
 import json
+import logging
 import os
+import re
 import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -37,6 +39,9 @@ INDEX_HTML = FRONTEND_DIR / "index.html"
 
 _db_path = os.environ.get("NO_SHIT_PROXY_DB", "noshitproxy.sqlite3")
 store = Store(StoreConfig(db_path=_db_path))
+logger = logging.getLogger("noshitproxy")
+
+_CHARSET_RE = re.compile(r"charset=([^;]+)", re.IGNORECASE)
 
 _subscribers: set[asyncio.Queue[str]] = set()
 _sub_lock = asyncio.Lock()
@@ -92,18 +97,38 @@ class FlowListQuery(BaseModel):
 
     limit: int = Field(default=200, ge=1, le=2000)
     offset: int = Field(default=0, ge=0)
-    q: str | None = None
-    host: str | None = None
-    method: str | None = None
-    status: int | None = None
-    url_contains: str | None = None
-    body_contains: str | None = None
-    duration_min: float | None = Field(default=None, ge=0)
-    duration_max: float | None = Field(default=None, ge=0)
-    resp_size_min: int | None = Field(default=None, ge=0)
-    resp_size_max: int | None = Field(default=None, ge=0)
+    where: str | None = None
     sort: Literal["num", "method", "url", "status", "size", "time"] | None = None
     order: Literal["asc", "desc"] | None = None
+
+
+class FlowMatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    where: str
+    ids: list[str] = Field(default_factory=list)
+
+
+class FlowMatchOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    matches: list[str]
+
+
+class ScopeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str]
+    exclude: list[str]
+    drop: bool
+
+
+class ScopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+    drop: bool = False
 
 
 class RepeatRequestIn(BaseModel):
@@ -130,6 +155,7 @@ class ReplayOpenRequestIn(BaseModel):
     url: str
     headers: list[tuple[str, str]] = Field(default_factory=list)
     body: str = ""
+    body_b64: str | None = None
 
 
 def _event_to_json(event: SseEvent) -> str:
@@ -166,13 +192,61 @@ def _make_browser_url(url: str, token: str) -> str:
     )
 
 
-def _filtered_raw_headers(response: httpx.Response) -> list[tuple[str, str]]:
+def _charset_from_content_type(content_type: str | None) -> str:
+    if content_type is None:
+        return "utf-8"
+
+    match = _CHARSET_RE.search(content_type)
+    if match is None:
+        return "utf-8"
+
+    charset = match.group(1).strip().strip('"').strip("'")
+    return charset or "utf-8"
+
+
+def _inject_base_href(html: str, base_href: str) -> str:
+    if "<base" in html.lower():
+        return html
+
+    tag = f'<base href="{base_href}">'
+
+    m = re.search(r"<head[^>]*>", html, flags=re.IGNORECASE)
+    if m:
+        idx = m.end()
+        return html[:idx] + tag + html[idx:]
+
+    m = re.search(r"</head>", html, flags=re.IGNORECASE)
+    if m:
+        idx = m.start()
+        return html[:idx] + tag + html[idx:]
+
+    return tag + html
+
+
+def _base_href_for_url(url: str) -> str:
+    parts = urlsplit(url)
+    path = parts.path or "/"
+    if not path.endswith("/"):
+        path = path.rsplit("/", 1)[0] + "/"
+    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _filtered_raw_headers(
+    response: httpx.Response, *, request_url: str
+) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for key_raw, value_raw in response.headers.raw:
         key = key_raw.decode("utf-8", "replace")
         value = value_raw.decode("utf-8", "replace")
-        if key.lower() in _HOP_BY_HOP_HEADERS:
+        key_lower = key.lower()
+
+        if key_lower in _HOP_BY_HOP_HEADERS:
             continue
+
+        if key_lower == "location":
+            out.append((key, urljoin(request_url, value)))
+            continue
+
         out.append((key, value))
     return out
 
@@ -289,6 +363,14 @@ async def ingest(payload: IngestRequest) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/api/flows/count")
+async def count_flows(query: Annotated[FlowListQuery, Depends()]) -> dict[str, int]:
+    try:
+        return {"count": await store.count_flows(where=query.where)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @app.get("/api/flows")
 async def list_flows(
     query: Annotated[FlowListQuery, Depends()],
@@ -296,20 +378,21 @@ async def list_flows(
     store_query = FlowQuery(
         limit=query.limit,
         offset=query.offset,
-        q=query.q,
-        host=query.host,
-        method=query.method,
-        status=query.status,
-        url_contains=query.url_contains,
-        body_contains=query.body_contains,
-        duration_min=query.duration_min,
-        duration_max=query.duration_max,
-        resp_size_min=query.resp_size_min,
-        resp_size_max=query.resp_size_max,
+        where=query.where,
         sort=query.sort,
         order=query.order,
     )
-    return await store.list_flows(store_query)
+
+    try:
+        return await store.list_flows(store_query)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/flows/clear")
+async def clear_flows() -> dict[str, bool]:
+    await store.clear_flows()
+    return {"ok": True}
 
 
 @app.get("/api/flows/{flow_id}")
@@ -318,6 +401,32 @@ async def get_flow(flow_id: str) -> FlowCompact:
     if flow is None:
         raise HTTPException(status_code=404, detail="not found")
     return flow
+
+
+@app.get("/api/scope")
+async def get_scope() -> ScopeOut:
+    include, exclude, drop = await store.get_scope()
+    return ScopeOut(include=include, exclude=exclude, drop=drop)
+
+
+@app.put("/api/scope")
+async def set_scope(payload: ScopeIn) -> ScopeOut:
+    include = [p.strip() for p in payload.include if p.strip()] or ["*"]
+    exclude = [p.strip() for p in payload.exclude if p.strip()]
+
+    await store.set_scope(include=include, exclude=exclude, drop=payload.drop)
+    saved_include, saved_exclude, saved_drop = await store.get_scope()
+    return ScopeOut(include=saved_include, exclude=saved_exclude, drop=saved_drop)
+
+
+@app.post("/api/flows/match")
+async def match_flows(payload: FlowMatchIn) -> FlowMatchOut:
+    try:
+        matches = await store.match_flow_ids(where=payload.where, ids=payload.ids)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return FlowMatchOut(matches=matches)
 
 
 @app.get("/api/flows/{flow_id}/response/body")
@@ -338,12 +447,16 @@ async def repeat(payload: RepeatRequestIn) -> RepeatResponse:
             status_code=400, detail="url must start with http:// or https://"
         )
 
-    return await repeat_request(
-        method=payload.method.strip(),
-        url=url,
-        headers_text=payload.headers,
-        body_text=payload.body,
-    )
+    try:
+        return await repeat_request(
+            method=payload.method.strip(),
+            url=url,
+            headers_text=payload.headers,
+            body_text=payload.body,
+        )
+    except Exception as e:
+        logger.exception("repeat failed")
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.post("/api/replay/open")
@@ -359,7 +472,13 @@ async def replay_open(payload: ReplayOpenRequestIn) -> dict[str, str]:
 
     method = payload.method.strip().upper()
     headers = _filter_upstream_headers(payload.headers)
-    body = payload.body.encode("utf-8", "replace")
+    if payload.body_b64:
+        try:
+            body = base64.b64decode(payload.body_b64)
+        except (ValueError, binascii.Error) as e:
+            raise HTTPException(status_code=400, detail="invalid body_b64") from e
+    else:
+        body = payload.body.encode("utf-8", "replace")
 
     async with _replay_lock:
         _prune_replay(now)
@@ -411,12 +530,25 @@ async def replay_get(token: str) -> Response:
             content=body,
         )
 
+    content = upstream.content
+
+    content_type = upstream.headers.get("content-type")
+    if content_type is not None and "text/html" in content_type.lower():
+        charset = _charset_from_content_type(content_type)
+        try:
+            text = content.decode(charset, "replace")
+        except LookupError:
+            text = content.decode("utf-8", "replace")
+
+        injected = _inject_base_href(text, _base_href_for_url(url))
+        content = injected.encode(charset, "replace")
+
     response = Response(
-        content=upstream.content,
+        content=content,
         status_code=upstream.status_code,
     )
 
-    for key, value in _filtered_raw_headers(upstream):
+    for key, value in _filtered_raw_headers(upstream, request_url=url):
         response.headers.append(key, value)
 
     return response

@@ -226,81 +226,35 @@ body {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.where-wrap {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.where-check {
+  white-space: nowrap;
 }
 
 .history-controls {
-  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
-.history-filters {
+.page-nav {
   display: flex;
-  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-  align-items: center;
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 
-.history-filters .ctrl-input {
-  width: 72px;
-  min-width: 72px;
-  flex-shrink: 0;
-}
-
-.history-filters .ctrl-input[type="text"] {
-  width: 130px;
-  min-width: 100px;
-}
-
-/* Remove dropdown arrow from select */
-.history-filters select.ctrl-input {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-image: none;
-  padding-right: 8px;
-  cursor: pointer;
-  width: 85px;
-  min-width: 85px;
-}
-
-/* Remove number input spinners */
-.history-filters input[type="number"] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-  text-align: center;
-}
-
-.history-filters input[type="number"]::-webkit-outer-spin-button,
-.history-filters input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.history-filters .btn {
-  flex-shrink: 0;
-}
-
-/* Hide scrollbar but keep functionality */
-.history-filters::-webkit-scrollbar {
-  height: 4px;
-}
-
-.history-filters::-webkit-scrollbar-thumb {
-  background: var(--bg-hover);
-  border-radius: 2px;
-}
-
-.history-filters::-webkit-scrollbar-track {
-  background: transparent;
-}
 
 .ctrl {
   display: flex;
@@ -324,6 +278,14 @@ body {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   height: 28px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.ctrl-input::-webkit-outer-spin-button,
+.ctrl-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .ctrl-input:focus {
@@ -340,13 +302,14 @@ body {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-secondary);
-  min-width: 72px;
-  text-align: right;
+  min-width: 64px;
+  text-align: center;
 }
 
 .search-container {
   position: relative;
-  max-width: 300px;
+  flex: 1;
+  min-width: 260px;
 }
 
 .search-icon {
@@ -674,6 +637,66 @@ body {
 .ctx-sep {
   height: 1px;
   background: var(--border-default);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal-card {
+  position: relative;
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 14px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.modal-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 .pane-content {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NoShitProxy</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=20260115">
 </head>
 <body>
   <!-- Header -->
@@ -25,6 +25,9 @@
       <div class="status-item">
         <span>CA</span>
         <a href="http://mitm.it" class="status-value">mitm.it</a>
+      </div>
+      <div class="status-item">
+        <button type="button" id="scope_btn" class="btn btn-ghost btn-sm">Scope</button>
       </div>
     </div>
   </header>
@@ -53,43 +56,36 @@
         <!-- Top: History Table -->
           <div class="history-section">
           <div class="history-toolbar">
-            <div class="search-container">
-              <span class="search-icon">🔍</span>
-              <input type="text" id="q" class="search-input" placeholder="Search...">
+            <div class="where-wrap">
+              <div class="search-container">
+                <span class="search-icon">⌕</span>
+                <input type="text" id="where" class="search-input" placeholder="SQL WHERE (e.g. status=200 AND url LIKE '%api%')">
+              </div>
+              <label class="checkbox-row where-check">
+                <input type="checkbox" id="hide_static" checked>
+                <span>Hide static</span>
+              </label>
+              <div class="ctrl-buttons">
+                <button type="button" id="where_apply" class="btn btn-ghost btn-sm">Apply</button>
+                <button type="button" id="where_clear" class="btn btn-ghost btn-sm">Clear</button>
+              </div>
             </div>
+
             <div class="history-controls">
               <label class="ctrl">
                 <span class="ctrl-label">Show</span>
-                <input type="number" id="page_size" class="ctrl-input" min="50" max="2000" step="50" value="500">
+                <input type="number" id="page_size" class="ctrl-input" min="50" max="2000" step="50" value="1000">
               </label>
-              <div class="ctrl-buttons">
-                <button type="button" id="page_newer" class="btn btn-ghost btn-sm">Newer</button>
-                <button type="button" id="page_older" class="btn btn-ghost btn-sm">Older</button>
+
+              <div class="page-nav">
+                <button type="button" id="page_newer" class="btn btn-ghost btn-sm" aria-label="Newer">←</button>
+                <div class="ctrl-meta" id="page_meta">Page 1</div>
+                <button type="button" id="page_older" class="btn btn-ghost btn-sm" aria-label="Older">→</button>
+                <button type="button" id="page_refresh" class="btn btn-ghost btn-sm" style="display:none;">Refresh</button>
               </div>
-              <div class="ctrl-meta" id="page_meta">Page 1</div>
             </div>
           </div>
 
-          <div class="history-filters">
-            <select id="f_method" class="ctrl-input">
-              <option value="">Method ▾</option>
-              <option>GET</option>
-              <option>POST</option>
-              <option>PUT</option>
-              <option>PATCH</option>
-              <option>DELETE</option>
-              <option>HEAD</option>
-              <option>OPTIONS</option>
-            </select>
-            <input type="number" id="f_status" class="ctrl-input" placeholder="Status =">
-            <input type="text" id="f_url" class="ctrl-input" placeholder="URL contains">
-            <input type="text" id="f_body" class="ctrl-input" placeholder="Body contains">
-            <input type="number" id="f_time_min" class="ctrl-input" placeholder="Time ≥">
-            <input type="number" id="f_time_max" class="ctrl-input" placeholder="Time ≤">
-            <input type="number" id="f_size_min" class="ctrl-input" placeholder="Size ≥">
-            <input type="number" id="f_size_max" class="ctrl-input" placeholder="Size ≤">
-            <button type="button" id="f_clear" class="btn btn-ghost btn-sm">Clear</button>
-          </div>
 
           <div class="history-table-wrapper">
             <table class="history-table" id="history-table">
@@ -129,6 +125,8 @@
                 <button type="button" id="pretty-response" class="btn btn-ghost btn-sm">Pretty</button>
                 <button type="button" id="raw-response-btn" class="btn btn-ghost btn-sm is-active">Raw</button>
                 <button type="button" id="load-full-response" class="btn btn-ghost btn-sm">Full</button>
+                <button type="button" id="history_to_repeater" class="btn btn-ghost btn-sm">To Repeater</button>
+                <button type="button" id="history_open" class="btn btn-ghost btn-sm">Open</button>
               </div>
             </div>
             <div class="pane-content">
@@ -204,7 +202,32 @@
     </div>
   </main>
 
+  <div id="scope-modal" class="modal" style="display:none;">
+    <div class="modal-backdrop" id="scope-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Scope</div>
+        <button type="button" id="scope-close" class="btn btn-ghost btn-sm">Close</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="scope-include">Include patterns (one per line, wildcard)</label>
+        <textarea id="scope-include" class="form-textarea" style="min-height:140px;" placeholder="*"></textarea>
+
+        <label class="form-label" for="scope-exclude">Exclude patterns (one per line, wildcard)</label>
+        <textarea id="scope-exclude" class="form-textarea" style="min-height:140px;" placeholder="*://*/favicon.ico&#10;*://*/*.css*&#10;*://*/*.js*"></textarea>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="scope-drop">
+          <span>Drop out of scope (block requests)</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="scope-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="ctx-menu" class="ctx-menu" style="display:none;"></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260115"></script>
 </body>
 </html>

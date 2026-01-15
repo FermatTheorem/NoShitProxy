@@ -7,6 +7,17 @@ import httpx
 
 from noshitproxy.models import RepeatResponse
 
+DROP_REQUEST_HEADERS = {
+    "connection",
+    "proxy-connection",
+    "keep-alive",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    "content-length",
+}
+
 
 def parse_headers_text(headers_text: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
@@ -15,7 +26,10 @@ def parse_headers_text(headers_text: str) -> list[tuple[str, str]]:
         if not line or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        out.append((key.strip(), value.strip()))
+        key = key.strip()
+        if key.lower() in DROP_REQUEST_HEADERS:
+            continue
+        out.append((key, value.strip()))
     return out
 
 

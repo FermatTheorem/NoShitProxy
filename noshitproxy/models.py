@@ -42,16 +42,7 @@ class FlowSummary:
 class FlowQuery:
     limit: int = 200
     offset: int = 0
-    q: str | None = None
-    host: str | None = None
-    method: str | None = None
-    status: int | None = None
-    url_contains: str | None = None
-    body_contains: str | None = None
-    duration_min: float | None = None
-    duration_max: float | None = None
-    resp_size_min: int | None = None
-    resp_size_max: int | None = None
+    where: str | None = None
     sort: str | None = None
     order: Literal["asc", "desc"] | None = None
 

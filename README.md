@@ -1,6 +1,6 @@
 # NoShitProxy
 
-Lightweight HTTP(S) interception proxy with no shit.
+Lightweight HTTP(S) interception web UI proxy with no shit.
 
 ## Requirements
 

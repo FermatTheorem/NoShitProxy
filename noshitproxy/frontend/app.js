@@ -202,22 +202,17 @@ function buildRawResponse(flow, pretty) {
    History List
    ───────────────────────────────────────────────────────────────── */
 const historyState = {
-  limit: 500,
+  limit: 1000,
   offset: 0,
   hasMore: true,
   items: [],
   selectedId: null,
   sort: null,
   order: null,
-
-  method: "",
-  status: "",
-  urlContains: "",
-  bodyContains: "",
-  timeMinMs: "",
-  timeMaxMs: "",
-  sizeMinKb: "",
-  sizeMaxKb: "",
+  where: "",
+  pendingCount: 0,
+  totalCount: null,
+  lastCountWhere: null,
 };
 
 function clampInt(value, min, max, fallback) {
@@ -260,6 +255,19 @@ function updateSortIndicators() {
   });
 }
 
+function updateRefreshButton() {
+  const btn = $("page_refresh");
+  if (!btn) return;
+
+  if (historyState.pendingCount > 0 && historyState.offset > 0) {
+    btn.style.display = "inline-flex";
+    btn.textContent = `Refresh (+${historyState.pendingCount})`;
+  } else {
+    btn.style.display = "none";
+    btn.textContent = "Refresh";
+  }
+}
+
 function updateHistoryControls() {
   $("page_size").value = String(historyState.limit);
   $("page_newer").disabled = historyState.offset === 0;
@@ -267,9 +275,121 @@ function updateHistoryControls() {
 
   const page = Math.floor(historyState.offset / historyState.limit) + 1;
   const sortText = historyState.sort ? ` • sort ${historyState.sort} ${historyState.order}` : "";
-  $("page_meta").textContent = `Page ${page}${sortText}`;
+  const countText = (typeof historyState.totalCount === "number") ? ` • ${historyState.totalCount}` : "";
+  $("page_meta").textContent = `Page ${page}${sortText}${countText}`;
 
   updateSortIndicators();
+  updateRefreshButton();
+}
+
+function _cmpStr(a, b) {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+function _cmpNum(a, b) {
+  const av = Number(a);
+  const bv = Number(b);
+  if (av === bv) return 0;
+  return av < bv ? -1 : 1;
+}
+
+function compareFlows(a, b) {
+  const sortKey = historyState.sort;
+  const order = historyState.order;
+
+  if (!sortKey) {
+    return _cmpNum(b.ts, a.ts);
+  }
+
+  const dir = order === "asc" ? 1 : -1;
+
+  if (sortKey === "num") {
+    return _cmpNum(a.seq, b.seq) * dir;
+  }
+
+  if (sortKey === "method") {
+    const c = _cmpStr(String(a.method || ""), String(b.method || "")) * dir;
+    if (c) return c;
+  }
+
+  if (sortKey === "url") {
+    const c = _cmpStr(String(a.url || ""), String(b.url || "")) * dir;
+    if (c) return c;
+  }
+
+  if (sortKey === "size") {
+    const c = _cmpNum(a.resp_size || 0, b.resp_size || 0) * dir;
+    if (c) return c;
+  }
+
+  if (sortKey === "status") {
+    const an = a.status;
+    const bn = b.status;
+    if (an == null && bn != null) return 1;
+    if (bn == null && an != null) return -1;
+    if (an != null && bn != null) {
+      const c = _cmpNum(an, bn) * dir;
+      if (c) return c;
+    }
+  }
+
+  if (sortKey === "time") {
+    const an = a.duration;
+    const bn = b.duration;
+    if (an == null && bn != null) return 1;
+    if (bn == null && an != null) return -1;
+    if (an != null && bn != null) {
+      const c = _cmpNum(an, bn) * dir;
+      if (c) return c;
+    }
+  }
+
+  // server tie-breaker
+  return _cmpNum(b.ts, a.ts);
+}
+
+function insertSorted(items, flow) {
+  let lo = 0;
+  let hi = items.length;
+
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (compareFlows(flow, items[mid]) < 0) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  items.splice(lo, 0, flow);
+}
+
+function applyIncomingFlow(flow) {
+  if (historyState.items.some(x => x.id === flow.id)) return;
+
+  if (typeof historyState.totalCount === "number") {
+    historyState.totalCount += 1;
+  }
+
+  if (historyState.offset > 0) {
+    historyState.pendingCount += 1;
+    updateHistoryControls();
+    return;
+  }
+
+  if (historyState.sort) {
+    insertSorted(historyState.items, flow);
+  } else {
+    historyState.items.unshift(flow);
+  }
+
+  if (historyState.items.length > historyState.limit) {
+    historyState.items.pop();
+  }
+
+  renderHistoryTable();
+  updateHistoryControls();
 }
 
 function addRow(flow) {
@@ -307,6 +427,32 @@ function renderHistoryTable() {
   }
 }
 
+async function loadCountIfNeeded(where) {
+  const w = where || "";
+  if (historyState.lastCountWhere === w && typeof historyState.totalCount === "number") {
+    return;
+  }
+
+  historyState.lastCountWhere = w;
+  historyState.totalCount = null;
+  updateHistoryControls();
+
+  const url = new URL("/api/flows/count", location.origin);
+  if (w) url.searchParams.set("where", w);
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data && typeof data.count === "number") {
+      historyState.totalCount = data.count;
+    }
+  } catch {
+    historyState.totalCount = null;
+  }
+
+  updateHistoryControls();
+}
+
 async function loadList({ resetOffset } = {}) {
   if (resetOffset) historyState.offset = 0;
 
@@ -319,25 +465,16 @@ async function loadList({ resetOffset } = {}) {
     url.searchParams.set("order", historyState.order);
   }
 
-  const q = $("q").value.trim();
-  if (q) url.searchParams.set("q", q);
+  const w = effectiveWhere();
+  if (w) url.searchParams.set("where", w);
 
-  if (historyState.method) url.searchParams.set("method", historyState.method);
-  if (historyState.urlContains) url.searchParams.set("url_contains", historyState.urlContains);
-  if (historyState.bodyContains) url.searchParams.set("body_contains", historyState.bodyContains);
-
-  if (historyState.status) url.searchParams.set("status", historyState.status);
-
-  if (historyState.timeMinMs) url.searchParams.set("duration_min", String(Number(historyState.timeMinMs) / 1000));
-  if (historyState.timeMaxMs) url.searchParams.set("duration_max", String(Number(historyState.timeMaxMs) / 1000));
-
-  if (historyState.sizeMinKb) url.searchParams.set("resp_size_min", String(Number(historyState.sizeMinKb) * 1024));
-  if (historyState.sizeMaxKb) url.searchParams.set("resp_size_max", String(Number(historyState.sizeMaxKb) * 1024));
+  loadCountIfNeeded(w).catch(() => {});
 
   try {
     const data = await fetch(url).then(r => r.json());
     historyState.items = Array.isArray(data) ? data : [];
     historyState.hasMore = historyState.items.length === historyState.limit;
+    historyState.pendingCount = 0;
     renderHistoryTable();
     updateHistoryControls();
   } catch (e) {
@@ -367,16 +504,27 @@ function setFullResponseButton() {
   btn.disabled = loaded || !currentFlow;
 }
 
+function setHistoryActionButtons() {
+  $("history_to_repeater") && ($("history_to_repeater").disabled = !currentFlow);
+  $("history_open") && ($("history_open").disabled = !currentFlow);
+}
+
 function renderDetail() {
   if (!currentFlow) return;
   $("raw-request").textContent = buildRawRequest(currentFlow, prettyRequest);
   $("raw-response").textContent = buildRawResponse(currentFlow, prettyResponse);
   setPrettyButtons();
   setFullResponseButton();
+  setHistoryActionButtons();
 }
 
 async function loadDetail(id) {
   historyState.selectedId = id;
+  const selected = document.querySelector(`.history-table tbody tr[data-id="${CSS.escape(id)}"]`);
+  if (selected) {
+    selected.scrollIntoView({ block: "nearest" });
+  }
+
   document.querySelectorAll(".history-table tbody tr").forEach(r =>
     r.classList.toggle("selected", r.dataset.id === id)
   );
@@ -465,18 +613,31 @@ async function openHistoryFlowInRepeater(flowId) {
   $("tab-repeater").checked = true;
 }
 
+function flowBodyForReplay(flow) {
+  const method = String(flow.method || "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") {
+    return { body: "", body_b64: null };
+  }
+
+  if (flow.req_body_b64) {
+    return { body: "", body_b64: flow.req_body_b64 };
+  }
+
+  return { body: flow.req_preview || "", body_b64: null };
+}
+
 async function openHistoryFlowInBrowser(flowId) {
   const flow = await fetch(`/api/flows/${encodeURIComponent(flowId)}`).then(r => r.json());
 
   const method = flow.method || "GET";
   const url = flow.url || "";
   const headers = flow.req_headers || [];
-  const body = (method.toUpperCase() === "GET" || method.toUpperCase() === "HEAD") ? "" : (flow.req_preview || "");
+  const bodyPayload = flowBodyForReplay(flow);
 
   const res = await fetch("/api/replay/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method, url, headers, body })
+    body: JSON.stringify({ method, url, headers, ...bodyPayload })
   });
 
   const data = await res.json();
@@ -485,20 +646,118 @@ async function openHistoryFlowInBrowser(flowId) {
   window.open(openUrl, "_blank", "noopener,noreferrer");
 }
 
+async function clearHistory() {
+  if (!confirm("Clear all captured flows?")) return;
+
+  await fetch("/api/flows/clear", { method: "POST" });
+
+  historyState.items = [];
+  historyState.hasMore = false;
+  historyState.pendingCount = 0;
+  historyState.totalCount = 0;
+  historyState.lastCountWhere = "";
+
+  currentFlow = null;
+  $("raw-request").textContent = "Select a request from the history above";
+  $("raw-response").textContent = "Response will appear here";
+
+  await loadList({ resetOffset: true });
+}
+
 function showHistoryMenu(x, y, flowId, url) {
   showContextMenu(x, y, [
     { label: "Open in Repeater (new tab)", onClick: () => openHistoryFlowInRepeater(flowId).catch(console.error) },
     "sep",
     { label: "Copy URL", onClick: () => copyToClipboard(url).catch(console.error) },
     { label: "Open in browser", onClick: () => openHistoryFlowInBrowser(flowId).catch(console.error) },
+    "sep",
+    { label: "Clear history", onClick: () => clearHistory().catch(console.error) },
   ]);
 }
 
 /* ─────────────────────────────────────────────────────────────────
    Repeater Tabs
    ───────────────────────────────────────────────────────────────── */
+const REPEATER_STORAGE_KEY = "nsp.repeater.tabs";
+
 const repeaterTabs = new Map();
 let activeRepeaterTabId = null;
+
+function persistRepeaterTabs() {
+  saveActiveRepeaterTab();
+
+  const tabs = Array.from(repeaterTabs.values()).map(t => ({
+    id: t.id,
+    title: t.title,
+    modeRaw: Boolean(t.modeRaw),
+    method: t.method || "GET",
+    url: t.url || "",
+    headersText: t.headersText || "",
+    body: t.body || "",
+    rawText: t.rawText || "",
+  }));
+
+  const payload = {
+    activeId: activeRepeaterTabId,
+    tabs,
+  };
+
+  localStorage.setItem(REPEATER_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function restoreRepeaterTabs() {
+  const raw = localStorage.getItem(REPEATER_STORAGE_KEY);
+  if (!raw) return false;
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!data || typeof data !== "object" || !Array.isArray(data.tabs)) return false;
+
+  repeaterTabs.clear();
+
+  for (const t of data.tabs) {
+    if (!t || typeof t !== "object") continue;
+
+    const id = typeof t.id === "string" && t.id ? t.id : newId();
+    const tab = {
+      id,
+      title: typeof t.title === "string" && t.title ? t.title : "Restored",
+      modeRaw: Boolean(t.modeRaw),
+      method: typeof t.method === "string" && t.method ? t.method : "GET",
+      url: typeof t.url === "string" ? t.url : "",
+      headersText: typeof t.headersText === "string" ? t.headersText : "",
+      body: typeof t.body === "string" ? t.body : "",
+      rawText: typeof t.rawText === "string" ? t.rawText : "",
+      lastResponse: null,
+      prettyResponse: false,
+    };
+
+    repeaterTabs.set(id, tab);
+  }
+
+  if (repeaterTabs.size === 0) return false;
+
+  const activeId = typeof data.activeId === "string" ? data.activeId : null;
+  activeRepeaterTabId = (activeId && repeaterTabs.has(activeId)) ? activeId : Array.from(repeaterTabs.keys())[0];
+
+  applyRepeaterTab(repeaterTabs.get(activeRepeaterTabId));
+  renderRepeaterTabs();
+  return true;
+}
+
+let _repeaterPersistTimer = null;
+function scheduleRepeaterPersist() {
+  if (_repeaterPersistTimer) clearTimeout(_repeaterPersistTimer);
+  _repeaterPersistTimer = setTimeout(() => {
+    _repeaterPersistTimer = null;
+    persistRepeaterTabs();
+  }, 250);
+}
 
 function newId() {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -556,6 +815,7 @@ function saveActiveRepeaterTab() {
   tab.prettyResponse = prettyRepeaterResponse;
 
   tab.title = tabTitleFromRequest(tab.method || "GET", tab.url || "");
+  scheduleRepeaterPersist();
 }
 
 function applyRepeaterTab(tab) {
@@ -579,6 +839,18 @@ function applyRepeaterTab(tab) {
   }
 }
 
+function renameRepeaterTab(id) {
+  const tab = repeaterTabs.get(id);
+  if (!tab) return;
+
+  const next = prompt("Tab name", tab.title);
+  if (!next) return;
+
+  tab.title = next.trim() || tab.title;
+  renderRepeaterTabs();
+  persistRepeaterTabs();
+}
+
 function renderRepeaterTabs() {
   const container = $("rep-tabs");
   container.innerHTML = "";
@@ -589,6 +861,10 @@ function renderRepeaterTabs() {
 
     const title = document.createElement("span");
     title.textContent = tab.title;
+    title.ondblclick = e => {
+      e.stopPropagation();
+      renameRepeaterTab(id);
+    };
 
     const close = document.createElement("button");
     close.type = "button";
@@ -615,6 +891,7 @@ function activateRepeaterTab(id) {
   activeRepeaterTabId = id;
   applyRepeaterTab(repeaterTabs.get(id));
   renderRepeaterTabs();
+  persistRepeaterTabs();
 }
 
 function closeRepeaterTab(id) {
@@ -637,6 +914,7 @@ function closeRepeaterTab(id) {
   }
 
   renderRepeaterTabs();
+  persistRepeaterTabs();
 }
 
 function createNewRepeaterTab(seed) {
@@ -662,17 +940,50 @@ function createNewRepeaterTab(seed) {
   activeRepeaterTabId = id;
   applyRepeaterTab(tab);
   renderRepeaterTabs();
+  persistRepeaterTabs();
+}
+
+function isPristineRepeaterTab(tab) {
+  return (
+    tab.title === "New" &&
+    tab.modeRaw === false &&
+    String(tab.method || "GET").toUpperCase() === "GET" &&
+    !tab.url &&
+    !tab.headersText &&
+    !tab.body &&
+    !tab.rawText &&
+    !tab.lastResponse
+  );
 }
 
 function createRepeaterTabFromFlow(flow) {
   const headersText = (flow.req_headers || []).map(([k, v]) => `${k}: ${v}`).join("\n");
-  const body = flow.req_preview || "";
+
+  let body = flow.req_preview || "";
+  const ct = headerValue(flow.req_headers, "content-type") || "";
+  if (
+    flow.req_body_b64 &&
+    (ct.includes("multipart/form-data") ||
+      ct.includes("application/x-www-form-urlencoded") ||
+      ct.includes("text/") ||
+      ct.includes("json") ||
+      ct.includes("xml"))
+  ) {
+    try {
+      const bytes = b64ToBytes(flow.req_body_b64);
+      body = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    } catch {
+      body = flow.req_preview || "";
+    }
+  }
+
   const seed = {
     method: flow.method || "GET",
     url: flow.url || "",
     headersText,
     body,
   };
+
   seed.title = tabTitleFromRequest(seed.method, seed.url);
   seed.rawText = (() => {
     const lines = [];
@@ -682,6 +993,24 @@ function createRepeaterTabFromFlow(flow) {
     if (body) lines.push(body);
     return lines.join("\n");
   })();
+
+  const active = getActiveRepeaterTab();
+  if (active && repeaterTabs.size === 1 && isPristineRepeaterTab(active)) {
+    active.title = seed.title;
+    active.modeRaw = false;
+    active.method = seed.method;
+    active.url = seed.url;
+    active.headersText = seed.headersText;
+    active.body = seed.body;
+    active.rawText = seed.rawText;
+    active.lastResponse = null;
+    active.prettyResponse = false;
+
+    applyRepeaterTab(active);
+    renderRepeaterTabs();
+    persistRepeaterTabs();
+    return;
+  }
 
   createNewRepeaterTab(seed);
 }
@@ -828,7 +1157,23 @@ async function sendRequest() {
       })
     });
 
-    const data = await res.json();
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(rawText || `HTTP ${res.status}`);
+    }
+
+    if (!res.ok) {
+      const msg = data && data.detail ? data.detail : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    if (!data || typeof data !== "object" || typeof data.status !== "number") {
+      throw new Error(rawText || `HTTP ${res.status}`);
+    }
+
     lastRepeaterResponse = data;
     prettyRepeaterResponse = false;
 
@@ -856,7 +1201,7 @@ async function openInBrowser() {
   const res = await fetch("/api/replay/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method, url, headers, body })
+    body: JSON.stringify({ method, url, headers, body, body_b64: null })
   });
 
   const data = await res.json();
@@ -868,7 +1213,178 @@ async function openInBrowser() {
 /* ─────────────────────────────────────────────────────────────────
    Event Listeners & Init
    ───────────────────────────────────────────────────────────────── */
-$("q").onkeydown = e => { if (e.key === "Enter") loadList({ resetOffset: true }); };
+// `WHERE` filter
+function readWhereFromUi() {
+  historyState.where = ($("where")?.value || "").trim();
+  localStorage.setItem("nsp.where", historyState.where);
+}
+
+function clearWhereUi() {
+  $("where").value = "";
+  readWhereFromUi();
+}
+
+const STATIC_EXTENSIONS = [
+  "css","js","map",
+  "png","jpg","jpeg","gif","svg","webp","ico",
+  "woff","woff2","ttf","eot",
+  "mp4","mp3","m4a",
+];
+
+function staticClause() {
+  const parts = STATIC_EXTENSIONS.map(ext => `url LIKE '%.${ext}%'`);
+  return `NOT (${parts.join(" OR ")})`;
+}
+
+function readHideStaticFromUi() {
+  const v = Boolean($("hide_static")?.checked);
+  localStorage.setItem("nsp.hide_static", v ? "1" : "0");
+  return v;
+}
+
+function hideStaticEnabled() {
+  const el = $("hide_static");
+  if (!el) return false;
+  return Boolean(el.checked);
+}
+
+let scopeWhere = "";
+
+function sqlQuote(text) {
+  return `'${String(text).replaceAll("'", "''")}'`;
+}
+
+function hasWildcard(pattern) {
+  return pattern.includes("*") || pattern.includes("?") || pattern.includes("[");
+}
+
+function clauseForPattern(pattern) {
+  if (hasWildcard(pattern)) {
+    return `url GLOB ${sqlQuote(pattern)}`;
+  }
+  return `url LIKE ${sqlQuote("%" + pattern + "%")}`;
+}
+
+function computeScopeWhere(include, exclude) {
+  const inc = Array.isArray(include) ? include.filter(Boolean) : [];
+  const exc = Array.isArray(exclude) ? exclude.filter(Boolean) : [];
+
+  const includeClause = (inc.length ? inc : ["*"]).map(clauseForPattern).join(" OR ");
+  const excludeClause = exc.length ? exc.map(clauseForPattern).join(" OR ") : "";
+
+  const out = [`(${includeClause})`];
+  if (excludeClause) out.push(`NOT (${excludeClause})`);
+  return out.join(" AND ");
+}
+
+function updateScopeWhereFromConfig(cfg) {
+  const include = Array.isArray(cfg.include) ? cfg.include : ["*"];
+  const exclude = Array.isArray(cfg.exclude) ? cfg.exclude : [];
+
+  const isDefault = include.length === 1 && include[0] === "*" && exclude.length === 0;
+  scopeWhere = isDefault ? "" : computeScopeWhere(include, exclude);
+}
+
+function effectiveWhere() {
+  const user = (historyState.where || "").trim();
+  const hideStatic = hideStaticEnabled();
+  const staticW = hideStatic ? staticClause() : "";
+
+  const parts = [];
+  if (user) parts.push(`(${user})`);
+  if (scopeWhere) parts.push(`(${scopeWhere})`);
+  if (staticW) parts.push(`(${staticW})`);
+
+  return parts.join(" AND ");
+}
+
+function hasWhere() {
+  return Boolean(effectiveWhere());
+}
+
+$("where")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    readWhereFromUi();
+    historyState.pendingCount = 0;
+    loadList({ resetOffset: true });
+  }
+});
+
+$("where_apply")?.addEventListener("click", () => {
+  readWhereFromUi();
+  historyState.pendingCount = 0;
+  loadList({ resetOffset: true });
+});
+
+$("where_clear")?.addEventListener("click", () => {
+  clearWhereUi();
+  historyState.pendingCount = 0;
+  loadList({ resetOffset: true });
+});
+
+// Scope modal
+function showScopeModal() {
+  $("scope-modal").style.display = "flex";
+}
+
+function hideScopeModal() {
+  $("scope-modal").style.display = "none";
+}
+
+async function loadScopeIntoUi() {
+  const res = await fetch("/api/scope");
+  const data = await res.json();
+  const include = Array.isArray(data.include) ? data.include : ["*"];
+  const exclude = Array.isArray(data.exclude) ? data.exclude : [];
+  $("scope-include").value = include.join("\n");
+  $("scope-exclude").value = exclude.join("\n");
+  $("scope-drop").checked = Boolean(data.drop);
+
+  updateScopeWhereFromConfig(data);
+}
+
+async function saveScopeFromUi() {
+  const include = ($("scope-include").value || "")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const exclude = ($("scope-exclude").value || "")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const drop = $("scope-drop").checked;
+
+  const res = await fetch("/api/scope", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ include, exclude, drop })
+  });
+
+  const data = await res.json();
+  updateScopeWhereFromConfig(data);
+
+  historyState.pendingCount = 0;
+  await loadList({ resetOffset: true });
+}
+
+$("scope_btn")?.addEventListener("click", () => {
+  loadScopeIntoUi().catch(console.error);
+  showScopeModal();
+});
+
+$("scope-close")?.addEventListener("click", () => hideScopeModal());
+$("scope-backdrop")?.addEventListener("click", () => hideScopeModal());
+
+$("scope-save")?.addEventListener("click", () => {
+  $("scope-save").textContent = "Saving...";
+  saveScopeFromUi().catch(console.error).finally(() => {
+    $("scope-save").textContent = "Save";
+    hideScopeModal();
+  });
+});
+
 $("send").onclick = sendRequest;
 $("rep-pretty")?.addEventListener("click", () => {
   if (!lastRepeaterResponse) return;
@@ -960,95 +1476,90 @@ $("raw-response-btn")?.addEventListener("click", () => {
 
 $("load-full-response")?.addEventListener("click", () => {
   $("load-full-response").textContent = "Loading...";
-  loadFullResponseBody().catch(e => {
-    console.error(e);
-  }).finally(() => {
-    $("load-full-response").textContent = currentFlow && currentFlow._resp_full ? "Full" : "Full";
-  });
+  loadFullResponseBody()
+    .catch(e => {
+      console.error(e);
+    })
+    .finally(() => {
+      $("load-full-response").textContent = "Full";
+    });
+});
+
+$("history_to_repeater")?.addEventListener("click", () => {
+  if (!currentFlow) return;
+  createRepeaterTabFromFlow(currentFlow);
+  $("tab-repeater").checked = true;
+});
+
+$("history_open")?.addEventListener("click", () => {
+  if (!currentFlow) return;
+
+  const method = currentFlow.method || "GET";
+  const url = currentFlow.url || "";
+  const headers = currentFlow.req_headers || [];
+  const bodyPayload = flowBodyForReplay(currentFlow);
+
+  fetch("/api/replay/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, url, headers, ...bodyPayload })
+  })
+    .then(r => r.json())
+    .then(data => {
+      const openUrl = data.browser_url || data.url;
+      if (!openUrl) throw new Error("no replay url");
+      window.open(openUrl, "_blank", "noopener,noreferrer");
+    })
+    .catch(console.error);
 });
 
 // Initial load
-createNewRepeaterTab();
+if (!restoreRepeaterTabs()) {
+  createNewRepeaterTab();
+}
+
 $("rep-new")?.addEventListener("click", () => {
   createNewRepeaterTab();
 });
 
-$("rep_method")?.addEventListener("change", () => {
-  saveActiveRepeaterTab();
-  renderRepeaterTabs();
-});
-$("rep_url")?.addEventListener("change", () => {
-  saveActiveRepeaterTab();
-  renderRepeaterTabs();
-});
+const repeaterInputs = ["rep_method", "rep_url", "rep_headers", "rep_body", "rep_raw"];
+for (const id of repeaterInputs) {
+  $(id)?.addEventListener("input", () => {
+    saveActiveRepeaterTab();
+    renderRepeaterTabs();
+  });
+}
 
 document.addEventListener("click", () => hideContextMenu());
 document.addEventListener("scroll", () => hideContextMenu(), true);
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") hideContextMenu();
+  if (e.key !== "Escape") return;
+  hideContextMenu();
+  hideScopeModal();
 });
 
 const savedPageSize = localStorage.getItem("nsp.page_size");
-historyState.limit = clampInt(savedPageSize, 50, 2000, 500);
+historyState.limit = clampInt(savedPageSize, 50, 2000, 1000);
 updateHistoryControls();
 
-function readFiltersFromUi() {
-  historyState.method = ($("f_method")?.value || "").trim().toUpperCase();
-  historyState.status = ($("f_status")?.value || "").trim();
-  historyState.urlContains = ($("f_url")?.value || "").trim();
-  historyState.bodyContains = ($("f_body")?.value || "").trim();
-  historyState.timeMinMs = ($("f_time_min")?.value || "").trim();
-  historyState.timeMaxMs = ($("f_time_max")?.value || "").trim();
-  historyState.sizeMinKb = ($("f_size_min")?.value || "").trim();
-  historyState.sizeMaxKb = ($("f_size_max")?.value || "").trim();
+// init WHERE from localStorage (done earlier if exists)
+
+const savedHideStatic = localStorage.getItem("nsp.hide_static");
+if (savedHideStatic !== null) {
+  $("hide_static").checked = savedHideStatic === "1";
 }
 
-function clearFiltersUi() {
-  $("f_method").value = "";
-  $("f_status").value = "";
-  $("f_url").value = "";
-  $("f_body").value = "";
-  $("f_time_min").value = "";
-  $("f_time_max").value = "";
-  $("f_size_min").value = "";
-  $("f_size_max").value = "";
-
-  readFiltersFromUi();
+const savedWhere = localStorage.getItem("nsp.where");
+if (savedWhere) {
+  $("where").value = savedWhere;
+  historyState.where = savedWhere;
 }
 
-function anyFiltersActive() {
-  const q = $("q").value.trim();
-  if (q) return true;
-
-  return Boolean(
-    historyState.method ||
-    historyState.status ||
-    historyState.urlContains ||
-    historyState.bodyContains ||
-    historyState.timeMinMs ||
-    historyState.timeMaxMs ||
-    historyState.sizeMinKb ||
-    historyState.sizeMaxKb
-  );
-}
-
-const filterIds = [
-  "f_method","f_status",
-  "f_url","f_body","f_time_min","f_time_max","f_size_min","f_size_max"
-];
-for (const id of filterIds) {
-  $(id)?.addEventListener("change", () => {
-    readFiltersFromUi();
-    loadList({ resetOffset: true });
-  });
-}
-
-$("f_clear")?.addEventListener("click", () => {
-  clearFiltersUi();
+$("hide_static")?.addEventListener("change", () => {
+  readHideStaticFromUi();
+  historyState.pendingCount = 0;
   loadList({ resetOffset: true });
 });
-
-readFiltersFromUi();
 
 $("page_size")?.addEventListener("change", () => {
   historyState.limit = clampInt($("page_size").value, 50, 2000, historyState.limit);
@@ -1058,39 +1569,92 @@ $("page_size")?.addEventListener("change", () => {
 
 $("page_older")?.addEventListener("click", () => {
   historyState.offset += historyState.limit;
+  historyState.pendingCount = 0;
   loadList();
 });
 
 $("page_newer")?.addEventListener("click", () => {
   historyState.offset = Math.max(0, historyState.offset - historyState.limit);
+  historyState.pendingCount = 0;
+  loadList();
+});
+
+$("page_refresh")?.addEventListener("click", () => {
+  historyState.pendingCount = 0;
   loadList();
 });
 
 loadList({ resetOffset: true });
 
 // Real-time updates via SSE
+const pendingWhere = new Map();
+let whereQueue = [];
+let whereTimer = null;
+
+function enqueueWhereMatch(flow) {
+  if (!flow || !flow.id) return;
+
+  pendingWhere.set(flow.id, flow);
+  whereQueue.push(flow.id);
+
+  if (whereTimer) return;
+
+  whereTimer = setTimeout(() => {
+    const ids = Array.from(new Set(whereQueue));
+    whereQueue = [];
+    whereTimer = null;
+
+    const where = effectiveWhere();
+    if (!where) return;
+
+    fetch("/api/flows/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ where, ids })
+    })
+      .then(r => r.json())
+      .then(data => {
+        const matches = (data && data.matches) || [];
+        const matchSet = new Set(matches);
+
+        for (const id of ids) {
+          const f = pendingWhere.get(id);
+          pendingWhere.delete(id);
+
+          if (matchSet.has(id) && f) {
+            applyIncomingFlow(f);
+          }
+        }
+      })
+      .catch(() => {});
+  }, 120);
+}
+
 const es = new EventSource("/api/events");
 es.onmessage = ev => {
   try {
     const msg = JSON.parse(ev.data);
-    const q = $("q").value.trim();
     if (msg.type !== "flow" || !msg.data) return;
 
-  // Update only first page with no filters and default sort.
-  if (historyState.offset !== 0) return;
-  if (historyState.sort || historyState.order) return;
-  if (anyFiltersActive()) return;
-
-
-    historyState.items.unshift(msg.data);
-    if (historyState.items.length > historyState.limit) {
-      historyState.items.pop();
+    if (historyState.offset > 0) {
+      if (hasWhere()) {
+        enqueueWhereMatch(msg.data);
+      } else {
+        historyState.pendingCount += 1;
+        updateHistoryControls();
+      }
+      return;
     }
 
-    renderHistoryTable();
-    updateHistoryControls();
+    if (!hasWhere()) {
+      applyIncomingFlow(msg.data);
+      return;
+    }
+
+    enqueueWhereMatch(msg.data);
   } catch {}
 };
+
 
 /* ─────────────────────────────────────────────────────────────────
    Resizable Columns
@@ -1111,6 +1675,7 @@ es.onmessage = ev => {
       }
 
       cycleSort(col);
+      historyState.pendingCount = 0;
       loadList({ resetOffset: true });
     });
   });
