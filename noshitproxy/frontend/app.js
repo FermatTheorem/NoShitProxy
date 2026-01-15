@@ -268,6 +268,8 @@ function updateRefreshButton() {
   }
 }
 
+let whereError = "";
+
 function updateHistoryControls() {
   $("page_size").value = String(historyState.limit);
   $("page_newer").disabled = historyState.offset === 0;
@@ -276,7 +278,8 @@ function updateHistoryControls() {
   const page = Math.floor(historyState.offset / historyState.limit) + 1;
   const sortText = historyState.sort ? ` • sort ${historyState.sort} ${historyState.order}` : "";
   const countText = (typeof historyState.totalCount === "number") ? ` • ${historyState.totalCount}` : "";
-  $("page_meta").textContent = `Page ${page}${sortText}${countText}`;
+  const errText = whereError ? ` • ERROR: ${whereError}` : "";
+  $("page_meta").textContent = `Page ${page}${sortText}${countText}${errText}`;
 
   updateSortIndicators();
   updateRefreshButton();
@@ -443,10 +446,18 @@ async function loadCountIfNeeded(where) {
   try {
     const res = await fetch(url);
     const data = await res.json();
-    if (data && typeof data.count === "number") {
-      historyState.totalCount = data.count;
+
+    if (!res.ok) {
+      whereError = (data && data.detail) ? String(data.detail) : `HTTP ${res.status}`;
+      historyState.totalCount = null;
+    } else {
+      whereError = "";
+      if (data && typeof data.count === "number") {
+        historyState.totalCount = data.count;
+      }
     }
   } catch {
+    whereError = "";
     historyState.totalCount = null;
   }
 
@@ -471,7 +482,18 @@ async function loadList({ resetOffset } = {}) {
   loadCountIfNeeded(w).catch(() => {});
 
   try {
-    const data = await fetch(url).then(r => r.json());
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!res.ok) {
+      whereError = (data && data.detail) ? String(data.detail) : `HTTP ${res.status}`;
+      historyState.items = [];
+      historyState.hasMore = false;
+      updateHistoryControls();
+      return;
+    }
+
+    whereError = "";
     historyState.items = Array.isArray(data) ? data : [];
     historyState.hasMore = historyState.items.length === historyState.limit;
     historyState.pendingCount = 0;
@@ -1377,6 +1399,18 @@ $("scope_btn")?.addEventListener("click", () => {
 $("scope-close")?.addEventListener("click", () => hideScopeModal());
 $("scope-backdrop")?.addEventListener("click", () => hideScopeModal());
 
+function showHelpModal() {
+  $("help-modal").style.display = "flex";
+}
+
+function hideHelpModal() {
+  $("help-modal").style.display = "none";
+}
+
+$("help-close")?.addEventListener("click", () => hideHelpModal());
+$("help-backdrop")?.addEventListener("click", () => hideHelpModal());
+$("where_help")?.addEventListener("click", () => showHelpModal());
+
 $("scope-save")?.addEventListener("click", () => {
   $("scope-save").textContent = "Saving...";
   saveScopeFromUi().catch(console.error).finally(() => {
@@ -1536,6 +1570,7 @@ document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   hideContextMenu();
   hideScopeModal();
+  hideHelpModal();
 });
 
 const savedPageSize = localStorage.getItem("nsp.page_size");

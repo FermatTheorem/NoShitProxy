@@ -59,7 +59,7 @@
             <div class="where-wrap">
               <div class="search-container">
                 <span class="search-icon">⌕</span>
-                <input type="text" id="where" class="search-input" placeholder="SQL WHERE (e.g. status=200 AND url LIKE '%api%')">
+                <input type="text" id="where" class="search-input" placeholder="SQL WHERE (Example: status=200 AND url LIKE '%/api/%')">
               </div>
               <label class="checkbox-row where-check">
                 <input type="checkbox" id="hide_static" checked>
@@ -68,6 +68,7 @@
               <div class="ctrl-buttons">
                 <button type="button" id="where_apply" class="btn btn-ghost btn-sm">Apply</button>
                 <button type="button" id="where_clear" class="btn btn-ghost btn-sm">Clear</button>
+                <button type="button" id="where_help" class="btn btn-ghost btn-sm">Help</button>
               </div>
             </div>
 
@@ -201,6 +202,37 @@
 
     </div>
   </main>
+
+  <div id="help-modal" class="modal" style="display:none;">
+    <div class="modal-backdrop" id="help-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">SQL WHERE Help</div>
+        <button type="button" id="help-close" class="btn btn-ghost btn-sm">Close</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-family: var(--font-mono); font-size: 0.8rem; white-space: pre-wrap; line-height: 1.4;">
+Columns:
+  id, ts, method, url, host, path, status, duration,
+  req_size, resp_size, req_preview, resp_preview,
+  req_headers_json, resp_headers_json, resp_body_text
+
+Examples:
+  status = 200
+  method = 'POST' AND url LIKE '%/upload/%'
+  resp_size > 100000
+  duration IS NOT NULL AND duration < 0.2
+  instr(resp_body_text, 'history.go(-1)') > 0
+  resp_body_text LIKE '%&lt;-- Back%'
+
+Notes:
+  - Strings use single quotes: '...'
+  - For substring match use LIKE '%text%' or instr(col, 'text') > 0
+  - You can use AND/OR/NOT and parentheses.
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="scope-modal" class="modal" style="display:none;">
     <div class="modal-backdrop" id="scope-backdrop"></div>
