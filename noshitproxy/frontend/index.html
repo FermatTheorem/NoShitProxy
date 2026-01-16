@@ -29,6 +29,11 @@
       <div class="status-item">
         <button type="button" id="scope_btn" class="btn btn-ghost btn-sm">Scope</button>
       </div>
+      <div class="status-item status-item-no-dot">
+        <button type="button" id="theme_toggle" class="btn btn-ghost btn-sm theme-toggle" aria-pressed="false">
+          <span class="theme-toggle-label">Dark</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -56,33 +61,38 @@
         <!-- Top: History Table -->
           <div class="history-section">
           <div class="history-toolbar">
-            <div class="where-wrap">
-              <div class="search-container">
-                <span class="search-icon">⌕</span>
-                <input type="text" id="where" class="search-input" placeholder="SQL WHERE (Example: status=200 AND url LIKE '%/api/%')">
-              </div>
-              <label class="checkbox-row where-check">
-                <input type="checkbox" id="hide_static" checked>
-                <span>Hide static</span>
-              </label>
-              <div class="ctrl-buttons">
-                <button type="button" id="where_apply" class="btn btn-ghost btn-sm">Apply</button>
-                <button type="button" id="where_clear" class="btn btn-ghost btn-sm">Clear</button>
-                <button type="button" id="where_help" class="btn btn-ghost btn-sm">Help</button>
+            <div class="history-filter-block toolbar-block">
+              <div class="where-wrap">
+                <div class="search-container">
+                  <span class="search-icon">⌕</span>
+                  <input type="text" id="where" class="search-input" placeholder="SQL WHERE (Example: status=200 AND url LIKE '%/api/%')">
+                </div>
+                <label class="checkbox-row where-check">
+                  <input type="checkbox" id="hide_static" checked>
+                  <span>Hide static</span>
+                </label>
+                <div class="ctrl-buttons">
+                  <button type="button" id="where_apply" class="btn btn-ghost btn-sm">Apply</button>
+                  <button type="button" id="where_clear" class="btn btn-ghost btn-sm">Clear</button>
+                  <button type="button" id="where_help" class="btn btn-ghost btn-sm">Help</button>
+                </div>
               </div>
             </div>
 
-            <div class="history-controls">
-              <label class="ctrl">
-                <span class="ctrl-label">Show</span>
-                <input type="number" id="page_size" class="ctrl-input" min="50" max="2000" step="50" value="1000">
-              </label>
+            <div class="history-page-block toolbar-block">
+              <div class="history-controls">
+                <label class="ctrl">
+                  <span class="ctrl-label">Show</span>
+                  <input type="number" id="page_size" class="ctrl-input" min="50" max="2000" step="50" value="1000">
+                </label>
 
-              <div class="page-nav">
-                <button type="button" id="page_newer" class="btn btn-ghost btn-sm" aria-label="Newer">←</button>
-                <div class="ctrl-meta" id="page_meta">Page 1</div>
-                <button type="button" id="page_older" class="btn btn-ghost btn-sm" aria-label="Older">→</button>
-                <button type="button" id="page_refresh" class="btn btn-ghost btn-sm" style="display:none;">Refresh</button>
+                <div class="page-nav">
+                  <button type="button" id="page_newer" class="btn btn-ghost btn-sm" aria-label="Newer">←</button>
+                  <div class="ctrl-meta" id="page_meta">Page 1</div>
+                  <div class="page-count" id="page_count"></div>
+                  <button type="button" id="page_older" class="btn btn-ghost btn-sm" aria-label="Older">→</button>
+                  <button type="button" id="page_refresh" class="btn btn-ghost btn-sm" style="display:none;">Refresh</button>
+                </div>
               </div>
             </div>
           </div>
@@ -90,14 +100,22 @@
 
           <div class="history-table-wrapper">
             <table class="history-table" id="history-table">
+              <colgroup>
+                <col data-col="num" style="width:48px">
+                <col data-col="method" style="width:86px">
+                <col data-col="url">
+                <col data-col="status" style="width:78px">
+                <col data-col="size" style="width:80px">
+                <col data-col="time" style="width:70px">
+              </colgroup>
               <thead>
                 <tr>
-                  <th data-col="num" style="width:48px"><span>#</span><div class="resize-handle"></div></th>
-                  <th data-col="method" style="width:70px"><span>Method</span><div class="resize-handle"></div></th>
+                  <th data-col="num"><span>#</span><div class="resize-handle"></div></th>
+                  <th data-col="method"><span>Method</span><div class="resize-handle"></div></th>
                   <th data-col="url"><span>URL</span><div class="resize-handle"></div></th>
-                  <th data-col="status" style="width:60px"><span>Status</span><div class="resize-handle"></div></th>
-                  <th data-col="size" style="width:80px"><span>Size</span><div class="resize-handle"></div></th>
-                  <th data-col="time" style="width:70px"><span>Time</span></th>
+                  <th data-col="status"><span>Status</span><div class="resize-handle"></div></th>
+                  <th data-col="size"><span>Size</span><div class="resize-handle"></div></th>
+                  <th data-col="time"><span>Time</span></th>
                 </tr>
               </thead>
               <tbody id="flows"></tbody>

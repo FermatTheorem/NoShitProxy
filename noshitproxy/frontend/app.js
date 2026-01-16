@@ -10,6 +10,34 @@ const esc = s => (s ?? "").toString()
   .replace(/</g, "&lt;")
   .replace(/>/g, "&gt;");
 
+const THEME_STORAGE_KEY = "nsp.theme";
+
+function normalizeTheme(value) {
+  return value === "light" ? "light" : "dark";
+}
+
+function setTheme(theme) {
+  const next = normalizeTheme(theme);
+  document.documentElement.setAttribute("data-theme", next);
+
+  const toggle = $("theme_toggle");
+  if (!toggle) return;
+
+  toggle.setAttribute("aria-pressed", next === "light" ? "true" : "false");
+
+  const label = toggle.querySelector(".theme-toggle-label");
+  if (label) {
+    label.textContent = next === "light" ? "Light" : "Dark";
+  }
+}
+
+function toggleTheme() {
+  const current = normalizeTheme(document.documentElement.getAttribute("data-theme"));
+  const next = current === "light" ? "dark" : "light";
+  setTheme(next);
+  localStorage.setItem(THEME_STORAGE_KEY, next);
+}
+
 // Clean binary/garbage from preview text
 function cleanPreview(text) {
   if (!text) return "";
@@ -277,9 +305,19 @@ function updateHistoryControls() {
 
   const page = Math.floor(historyState.offset / historyState.limit) + 1;
   const sortText = historyState.sort ? ` • sort ${historyState.sort} ${historyState.order}` : "";
-  const countText = (typeof historyState.totalCount === "number") ? ` • ${historyState.totalCount}` : "";
   const errText = whereError ? ` • ERROR: ${whereError}` : "";
-  $("page_meta").textContent = `Page ${page}${sortText}${countText}${errText}`;
+  $("page_meta").textContent = `Page ${page}${sortText}${errText}`;
+
+  const countEl = $("page_count");
+  if (countEl) {
+    if (typeof historyState.totalCount === "number") {
+      countEl.textContent = `${historyState.totalCount} total`;
+      countEl.style.display = "inline-flex";
+    } else {
+      countEl.textContent = "";
+      countEl.style.display = "none";
+    }
+  }
 
   updateSortIndicators();
   updateRefreshButton();
@@ -1590,6 +1628,10 @@ if (savedWhere) {
   historyState.where = savedWhere;
 }
 
+const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+setTheme(savedTheme);
+$("theme_toggle")?.addEventListener("click", () => toggleTheme());
+
 $("hide_static")?.addEventListener("change", () => {
   readHideStaticFromUi();
   historyState.pendingCount = 0;
@@ -1719,29 +1761,50 @@ es.onmessage = ev => {
 (function initResizableColumns() {
   const table = $("history-table");
   if (!table) return;
-  
+
+  const colgroup = table.querySelector("colgroup");
+  const cols = colgroup ? Array.from(colgroup.querySelectorAll("col")) : [];
+  if (cols.length === 0) return;
+
   let activeHandle = null;
   let startX = 0;
   let startWidth = 0;
-  let th = null;
+  let nextStartWidth = 0;
+  let activeCol = null;
+  let nextCol = null;
 
   table.querySelectorAll(".resize-handle").forEach(handle => {
     handle.addEventListener("mousedown", e => {
       e.preventDefault();
+      const header = handle.parentElement;
+      const colKey = header?.getAttribute("data-col");
+      const index = cols.findIndex(col => col.getAttribute("data-col") === colKey);
+      if (index < 0 || index >= cols.length - 1) return;
+
       activeHandle = handle;
-      th = handle.parentElement;
+      activeCol = cols[index];
+      nextCol = cols[index + 1];
       startX = e.pageX;
-      startWidth = th.offsetWidth;
+      startWidth = activeCol.getBoundingClientRect().width;
+      nextStartWidth = nextCol.getBoundingClientRect().width;
       handle.classList.add("active");
       table.classList.add("resizing");
     });
   });
 
   document.addEventListener("mousemove", e => {
-    if (!activeHandle) return;
-    const diff = e.pageX - startX;
-    const newWidth = Math.max(40, startWidth + diff);
-    th.style.width = newWidth + "px";
+    if (!activeHandle || !activeCol || !nextCol) return;
+
+    const minWidth = 40;
+    let diff = e.pageX - startX;
+    diff = Math.min(startWidth - minWidth, diff);
+    diff = Math.max(-(nextStartWidth - minWidth), diff);
+
+    const newWidth = Math.max(minWidth, startWidth + diff);
+    const nextWidth = Math.max(minWidth, nextStartWidth - diff);
+
+    activeCol.style.width = `${newWidth}px`;
+    nextCol.style.width = `${nextWidth}px`;
   });
 
   document.addEventListener("mouseup", () => {
@@ -1749,7 +1812,8 @@ es.onmessage = ev => {
       activeHandle.classList.remove("active");
       table.classList.remove("resizing");
       activeHandle = null;
-      th = null;
+      activeCol = null;
+      nextCol = null;
     }
   });
 })();
