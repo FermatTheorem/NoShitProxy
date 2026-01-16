@@ -106,7 +106,8 @@
                 <col data-col="url">
                 <col data-col="status" style="width:78px">
                 <col data-col="size" style="width:80px">
-                <col data-col="time" style="width:70px">
+                <col data-col="start" style="width:150px">
+                <col data-col="time" style="width:80px">
               </colgroup>
               <thead>
                 <tr>
@@ -115,7 +116,8 @@
                   <th data-col="url"><span>URL</span><div class="resize-handle"></div></th>
                   <th data-col="status"><span>Status</span><div class="resize-handle"></div></th>
                   <th data-col="size"><span>Size</span><div class="resize-handle"></div></th>
-                  <th data-col="time"><span>Time</span></th>
+                  <th data-col="start"><span>Start</span><div class="resize-handle"></div></th>
+                  <th data-col="time"><span>Duration</span></th>
                 </tr>
               </thead>
               <tbody id="flows"></tbody>
@@ -231,7 +233,7 @@
       <div class="modal-body">
         <div style="font-family: var(--font-mono); font-size: 0.8rem; white-space: pre-wrap; line-height: 1.4;">
 Columns:
-  id, ts, method, url, host, path, status, duration,
+  id, ts, start_at, method, url, host, path, status, duration,
   req_size, resp_size, req_preview, resp_preview,
   req_headers_json, resp_headers_json, resp_body_text
 

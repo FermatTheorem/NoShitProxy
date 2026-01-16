@@ -156,6 +156,11 @@ function formatDuration(d) {
   return d.toFixed(2) + "s";
 }
 
+function formatStartAt(value) {
+  if (!value) return "—";
+  return String(value);
+}
+
 const methodClass = m => `method-${(m || "get").toLowerCase()}`;
 const statusClass = code => {
   if (!code) return "status-pending";
@@ -250,7 +255,7 @@ function clampInt(value, min, max, fallback) {
 }
 
 function isSortableCol(col) {
-  return ["num", "method", "url", "status", "size", "time"].includes(col);
+  return ["num", "method", "url", "status", "size", "time", "start"].includes(col);
 }
 
 function cycleSort(col) {
@@ -304,9 +309,8 @@ function updateHistoryControls() {
   $("page_older").disabled = !historyState.hasMore;
 
   const page = Math.floor(historyState.offset / historyState.limit) + 1;
-  const sortText = historyState.sort ? ` • sort ${historyState.sort} ${historyState.order}` : "";
   const errText = whereError ? ` • ERROR: ${whereError}` : "";
-  $("page_meta").textContent = `Page ${page}${sortText}${errText}`;
+  $("page_meta").textContent = `Page ${page}${errText}`;
 
   const countEl = $("page_count");
   if (countEl) {
@@ -386,6 +390,11 @@ function compareFlows(a, b) {
     }
   }
 
+  if (sortKey === "start") {
+    const c = _cmpNum(a.ts, b.ts) * dir;
+    if (c) return c;
+  }
+
   // server tie-breaker
   return _cmpNum(b.ts, a.ts);
 }
@@ -447,6 +456,7 @@ function addRow(flow) {
     <td class="url-text">${esc(flow.url)}</td>
     <td><span class="status-badge ${statusClass(flow.status)}">${flow.status ?? "—"}</span></td>
     <td class="size-cell">${formatBytes(flow.resp_size)}</td>
+    <td class="start-cell">${formatStartAt(flow.start_at)}</td>
     <td class="time-cell">${formatDuration(flow.duration)}</td>
   `;
 

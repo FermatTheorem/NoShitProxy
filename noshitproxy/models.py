@@ -36,6 +36,7 @@ class FlowSummary:
     duration: float | None
     req_size: int
     resp_size: int
+    start_at: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

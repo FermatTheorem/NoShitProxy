@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -59,6 +60,7 @@ class Store:
               path TEXT,
               status INTEGER,
               duration REAL,
+              start_at TEXT,
               req_headers_json TEXT,
               resp_headers_json TEXT,
               req_size INTEGER,
@@ -84,6 +86,7 @@ class Store:
         await db.commit()
         await _ensure_column(db, table="flows", column="resp_body_b64", ddl="TEXT")
         await _ensure_column(db, table="flows", column="resp_body_text", ddl="TEXT")
+        await _ensure_column(db, table="flows", column="start_at", ddl="TEXT")
         await _ensure_setting(
             db,
             key="scope",
@@ -102,11 +105,12 @@ class Store:
             """
              INSERT INTO flows (
               id, ts, method, url, host, path, status, duration,
+              start_at,
               req_headers_json, resp_headers_json,
               req_size, resp_size, req_body_b64,
               req_preview, resp_preview,
               resp_body_b64, resp_body_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               ts=excluded.ts,
               method=excluded.method,
@@ -115,6 +119,7 @@ class Store:
               path=excluded.path,
               status=excluded.status,
               duration=excluded.duration,
+              start_at=excluded.start_at,
               req_headers_json=excluded.req_headers_json,
               resp_headers_json=excluded.resp_headers_json,
               req_size=excluded.req_size,
@@ -134,6 +139,7 @@ class Store:
                 flow.path,
                 flow.status,
                 flow.duration,
+                _format_start_at(flow.ts),
                 json.dumps(flow.req_headers, ensure_ascii=False),
                 json.dumps(flow.resp_headers, ensure_ascii=False),
                 int(flow.req_size),
@@ -235,6 +241,7 @@ class Store:
                 duration=row[8],
                 req_size=row[9],
                 resp_size=row[10],
+                start_at=_format_start_at(row[2]),
             )
             for row in rows
         ]
@@ -373,6 +380,14 @@ class Store:
         )
 
 
+def _format_start_at(ts: object) -> str:
+    if not isinstance(ts, int | float):
+        return "—"
+
+    dt = datetime.fromtimestamp(float(ts), tz=UTC).astimezone()
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _order_by_sql(sort_key: str | None, order: str | None) -> str:
     direction = "ASC" if order == "asc" else "DESC"
 
@@ -381,9 +396,6 @@ def _order_by_sql(sort_key: str | None, order: str | None) -> str:
         "method": "method",
         "size": "resp_size",
     }
-
-    if sort_key is None:
-        return "ORDER BY ts DESC"
 
     if sort_key == "num":
         return f"ORDER BY rowid {direction}"
@@ -397,6 +409,9 @@ def _order_by_sql(sort_key: str | None, order: str | None) -> str:
 
     if sort_key == "time":
         return f"ORDER BY duration IS NULL ASC, duration {direction}, ts DESC"
+
+    if sort_key == "start":
+        return f"ORDER BY ts {direction}"
 
     return "ORDER BY ts DESC"
 

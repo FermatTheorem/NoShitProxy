@@ -566,6 +566,12 @@ body {
   color: var(--text-secondary);
 }
 
+.start-cell {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
 .num-cell {
   font-family: var(--font-mono);
   font-size: 0.7rem;

@@ -31,7 +31,7 @@ from noshitproxy.models import (
 )
 
 from .repeater import repeat_request
-from .store import Store, StoreConfig
+from .store import Store, StoreConfig, _format_start_at
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = APP_ROOT / "frontend"
@@ -98,7 +98,9 @@ class FlowListQuery(BaseModel):
     limit: int = Field(default=200, ge=1, le=2000)
     offset: int = Field(default=0, ge=0)
     where: str | None = None
-    sort: Literal["num", "method", "url", "status", "size", "time"] | None = None
+    sort: Literal["num", "method", "url", "status", "size", "time", "start"] | None = (
+        None
+    )
     order: Literal["asc", "desc"] | None = None
 
 
@@ -357,6 +359,7 @@ async def ingest(payload: IngestRequest) -> dict[str, bool]:
         duration=flow.duration,
         req_size=flow.req_size,
         resp_size=flow.resp_size,
+        start_at=_format_start_at(flow.ts),
     )
 
     await publish(SseEvent(event_type="flow", data=summary))
