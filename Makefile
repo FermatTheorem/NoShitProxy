@@ -5,6 +5,7 @@ BACKEND_HOST = 127.0.0.1
 BACKEND_PORT = 8000
 PROXY_HOST = 127.0.0.1
 PROXY_PORT = 8080
+UPSTREAM_PROXY ?=
 
 BACKEND_PID = $(RUN_DIR)/backend.pid
 PROXY_PID = $(RUN_DIR)/proxy.pid
@@ -27,25 +28,41 @@ fmt:  ## Automatically re-format the code
 	uv run ruff format $(SRC)
 
 .PHONY: up
-up:  ## Start backend and proxy (background)
-	@mkdir -p $(RUN_DIR)
-	@$(MAKE) _start-backend
-	@$(MAKE) _start-proxy
-	@$(MAKE) status
+up:  ## Start backend and proxy in Docker
+	@UPSTREAM_PROXY="$(UPSTREAM_PROXY)" docker compose up -d
 
 .PHONY: down
-down:  ## Stop backend and proxy
-	@$(MAKE) _stop-proxy
-	@$(MAKE) _stop-backend
+down:  ## Stop Docker services
+	@docker compose down
 
 .PHONY: status
-status:  ## Show running PIDs
-	@sh -c 'if [ -f "$(BACKEND_PID)" ] && kill -0 "$$(cat "$(BACKEND_PID)")" 2>/dev/null; then echo "backend: $$(cat "$(BACKEND_PID)") (http://$(BACKEND_HOST):$(BACKEND_PORT))"; else echo "backend: stopped"; fi'
-	@sh -c 'if [ -f "$(PROXY_PID)" ] && kill -0 "$$(cat "$(PROXY_PID)")" 2>/dev/null; then echo "proxy:   $$(cat "$(PROXY_PID)") ($(PROXY_HOST):$(PROXY_PORT))"; else echo "proxy:   stopped"; fi'
-	@echo "logs:    $(BACKEND_LOG) $(PROXY_LOG)"
+status:  ## Show Docker container status
+	@docker compose ps
+
+.PHONY: logs
+logs:  ## Show Docker logs
+	@docker compose logs -f
 
 .PHONY: run
 run: up  ## Alias for up
+
+.PHONY: up-local
+up-local:  ## Start backend and proxy locally (no Docker)
+	@mkdir -p $(RUN_DIR)
+	@$(MAKE) _start-backend
+	@$(MAKE) _start-proxy
+	@$(MAKE) status-local
+
+.PHONY: down-local
+down-local:  ## Stop local services
+	@$(MAKE) _stop-proxy
+	@$(MAKE) _stop-backend
+
+.PHONY: status-local
+status-local:  ## Show running PIDs for local services
+	@sh -c 'if [ -f "$(BACKEND_PID)" ] && kill -0 "$$(cat "$(BACKEND_PID)")" 2>/dev/null; then echo "backend: $$(cat "$(BACKEND_PID)") (http://$(BACKEND_HOST):$(BACKEND_PORT))"; else echo "backend: stopped"; fi'
+	@sh -c 'if [ -f "$(PROXY_PID)" ] && kill -0 "$$(cat "$(PROXY_PID)")" 2>/dev/null; then echo "proxy:   $$(cat "$(PROXY_PID)") ($(PROXY_HOST):$(PROXY_PORT))"; else echo "proxy:   stopped"; fi'
+	@echo "logs:    $(BACKEND_LOG) $(PROXY_LOG)"
 
 .PHONY: _start-backend
 _start-backend:
@@ -53,7 +70,7 @@ _start-backend:
 
 .PHONY: _start-proxy
 _start-proxy:
-	@sh -c 'pidfile="$(PROXY_PID)"; logfile="$(PROXY_LOG)"; if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then echo "proxy already running: $$(cat "$$pidfile")"; exit 1; fi; rm -f "$$pidfile"; PYTHONPATH="$(CURDIR)" uv run mitmdump -q -s noshitproxy/proxy/bridge_addon.py --listen-host $(PROXY_HOST) --listen-port $(PROXY_PORT) > "$$logfile" 2>&1 & echo $$! > "$$pidfile"'
+	@sh -c 'pidfile="$(PROXY_PID)"; logfile="$(PROXY_LOG)"; if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then echo "proxy already running: $$(cat "$$pidfile")"; exit 1; fi; rm -f "$$pidfile"; PYTHONPATH="$(CURDIR)" PROXY_HOST=$(PROXY_HOST) PROXY_PORT=$(PROXY_PORT) UPSTREAM_PROXY="$(UPSTREAM_PROXY)" ./start-proxy.sh > "$$logfile" 2>&1 & echo $$! > "$$pidfile"'
 
 .PHONY: _stop-backend
 _stop-backend:

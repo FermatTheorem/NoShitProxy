@@ -1,0 +1,15 @@
+services:
+  noshitproxy:
+    build: .
+    network_mode: host
+    environment:
+      - BACKEND_HOST=127.0.0.1
+      - BACKEND_PORT=8000
+      - PROXY_HOST=127.0.0.1
+      - PROXY_PORT=8080
+      - UPSTREAM_PROXY=${UPSTREAM_PROXY:-}
+      - NO_SHIT_PROXY_DB=/app/data/noshitproxy.sqlite3
+    volumes:
+      - ./data:/app/data
+      - ./mitmproxy-certs:/root/.mitmproxy
+    restart: unless-stopped

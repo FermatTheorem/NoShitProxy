@@ -17,3 +17,6 @@ wheels/
 *.log
 *.pid
 noshitproxy.sqlite3*
+.run/
+data/
+mitmproxy-certs/
